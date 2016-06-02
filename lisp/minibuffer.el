@@ -1779,6 +1779,7 @@ variables.")
   (message "Making completion list...")
   (let* ((start (or start (minibuffer-prompt-end)))
          (end (or end (point-max)))
+         (prompt (buffer-substring 1 (- start 1)))
          (string (buffer-substring start end))
          (md (completion--field-metadata start))
          (completions (completion-all-completions
@@ -1893,9 +1894,88 @@ variables.")
                        (completion--done result
                                          (if (eq (car bounds) (length result))
                                              'exact 'finished)))))))
-
-          (display-completion-list completions))))
+          (display-completion-list
+           (cond
+            ((equal prompt "Insert character (Unicode name or hex):")
+             (append (recommended-completions completions (s-trim string))
+                     completions))
+            (t completions))))))
     nil))
+
+(defun recommended-completions (completions string)
+  (cond
+   ((null string) nil)
+   ((< (length completions) 10) nil)
+   (t
+    (let* ((newCompletions (assign-values-to-completions completions string))
+           (newCompletions (cl-remove-if (lambda (x) (null x))
+                                         newCompletions))
+           (newCompletions (sort newCompletions (lambda (a b)
+                                                  (> (cadr a) (cadr b)))))
+           (newCompletions (first-n newCompletions 40))
+           (newCompletions (remove-scores newCompletions)))
+      (cond
+       ((null newCompletions) nil)
+       (t (append newCompletions '("------------------------------------"))))))))
+
+(defun assign-values-to-completions (completions string)
+  (cond
+   ((null completions) nil)
+   (t (cons (assign-value-to-completion (car completions) string)
+            (assign-values-to-completions (cdr completions) string)))))
+
+(defun assign-value-to-completion (completion string)
+  (let* ((value 0)
+         ; Now add to the value if the completion matches the string
+         (value (cond ((match-word string (car completion))
+                       (+ value 20))
+                      (t value)))
+         (value (+ value (* 10 (times-words-match (car completion)
+                                                  (split-string string " ")))))
+         (value (+ value (/ 200 (length (car completion)))))
+         )
+    (cond
+     ((= value 0) nil)
+     (t (list completion value)))))
+
+(defun times-words-match (wholeString words)
+  (cond
+   ((null words) 0)
+   ((match-word wholeString (car words))
+    (+ 1 (times-words-match wholeString (cdr words))))
+   (t (times-words-match wholeString (cdr words)))))
+
+(defun match-word (wholeString word)
+  (string-match (concat "\\( " wholeString " \\)\\|"
+                        "\\(`" wholeString " \\)\\|"
+                        "\\( " wholeString "'\\)\\|"
+                        "\\(`" wholeString "'\\)")
+                word))
+
+(defun first-n (completions n)
+  (cond
+   ((<= n 0) nil)
+   ((null completions) nil)
+   (t (cons (car completions) (first-n (cdr completions) (- n 1))))))
+
+(defun remove-scores (completions)
+  (cond
+   ((null completions) nil)
+   (t (cons (car (car completions)) (remove-scores (cdr completions))))))
+
+(defun s-trim-left (s)
+  (if (string-match "\\`[ \t\n\r]+" s)
+      (replace-match "" t t s)
+    s))
+
+(defun s-trim-right (s)
+  (if (string-match "[ \t\n\r]+\\'" s)
+      (replace-match "" t t s)
+    s))
+
+(defun s-trim (s)
+  (s-trim-left (s-trim-right s)))
+
 
 (defun minibuffer-hide-completions ()
   "Get rid of an out-of-date *Completions* buffer."
